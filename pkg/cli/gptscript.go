@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/acorn-io/cmd"
 	"github.com/fatih/color"
+	"github.com/gptscript-ai/cmd"
 	"github.com/gptscript-ai/gptscript/pkg/assemble"
 	"github.com/gptscript-ai/gptscript/pkg/auth"
 	"github.com/gptscript-ai/gptscript/pkg/builtin"
@@ -53,24 +53,24 @@ type GPTScript struct {
 	Output         string `usage:"Save output to a file, or - for stdout" short:"o"`
 	EventsStreamTo string `usage:"Stream events to this location, could be a file descriptor/handle (e.g. fd://2), filename, or named pipe (e.g. \\\\.\\pipe\\my-pipe)" name:"events-stream-to"`
 	// Input should not be using GPTSCRIPT_INPUT env var because that is the same value that is set in tool executions
-	Input              string `usage:"Read input from a file (\"-\" for stdin)" short:"f" env:"GPTSCRIPT_INPUT_FILE"`
-	SubTool            string `usage:"Use tool of this name, not the first tool in file" local:"true"`
-	Assemble           bool   `usage:"Assemble tool to a single artifact, saved to --output" hidden:"true" local:"true"`
-	ListModels         bool   `usage:"List the models available and exit" local:"true"`
-	ListTools          bool   `usage:"List built-in tools and exit" local:"true"`
-	ListenAddress      string `usage:"Server listen address" default:"127.0.0.1:0" hidden:"true"`
-	Chdir              string `usage:"Change current working directory" short:"C"`
-	Daemon             bool   `usage:"Run tool as a daemon" local:"true" hidden:"true"`
-	Ports              string `usage:"The port range to use for ephemeral daemon ports (ex: 11000-12000)" hidden:"true"`
-	CredentialContext  string `usage:"Context name in which to store credentials" default:"default"`
-	CredentialOverride string `usage:"Credentials to override (ex: --credential-override github.com/example/cred-tool:API_TOKEN=1234)"`
-	ChatState          string `usage:"The chat state to continue, or null to start a new chat and return the state" local:"true"`
-	ForceChat          bool   `usage:"Force an interactive chat session if even the top level tool is not a chat tool" local:"true"`
-	ForceSequential    bool   `usage:"Force parallel calls to run sequentially" local:"true"`
-	Workspace          string `usage:"Directory to use for the workspace, if specified it will not be deleted on exit"`
-	UI                 bool   `usage:"Launch the UI" local:"true" name:"ui"`
-	DisableTUI         bool   `usage:"Don't use chat TUI but instead verbose output" local:"true" name:"disable-tui"`
-	SaveChatStateFile  string `usage:"A file to save the chat state to so that a conversation can be resumed with --chat-state" local:"true"`
+	Input              string   `usage:"Read input from a file (\"-\" for stdin)" short:"f" env:"GPTSCRIPT_INPUT_FILE"`
+	SubTool            string   `usage:"Use tool of this name, not the first tool in file" local:"true"`
+	Assemble           bool     `usage:"Assemble tool to a single artifact, saved to --output" hidden:"true" local:"true"`
+	ListModels         bool     `usage:"List the models available and exit" local:"true"`
+	ListTools          bool     `usage:"List built-in tools and exit" local:"true"`
+	ListenAddress      string   `usage:"Server listen address" default:"127.0.0.1:0" hidden:"true"`
+	Chdir              string   `usage:"Change current working directory" short:"C"`
+	Daemon             bool     `usage:"Run tool as a daemon" local:"true" hidden:"true"`
+	Ports              string   `usage:"The port range to use for ephemeral daemon ports (ex: 11000-12000)" hidden:"true"`
+	CredentialContext  string   `usage:"Context name in which to store credentials" default:"default"`
+	CredentialOverride []string `usage:"Credentials to override (ex: --credential-override github.com/example/cred-tool:API_TOKEN=1234)"`
+	ChatState          string   `usage:"The chat state to continue, or null to start a new chat and return the state" local:"true"`
+	ForceChat          bool     `usage:"Force an interactive chat session if even the top level tool is not a chat tool" local:"true"`
+	ForceSequential    bool     `usage:"Force parallel calls to run sequentially" local:"true"`
+	Workspace          string   `usage:"Directory to use for the workspace, if specified it will not be deleted on exit"`
+	UI                 bool     `usage:"Launch the UI" local:"true" name:"ui"`
+	DisableTUI         bool     `usage:"Don't use chat TUI but instead verbose output" local:"true" name:"disable-tui"`
+	SaveChatStateFile  string   `usage:"A file to save the chat state to so that a conversation can be resumed with --chat-state" local:"true"`
 
 	readData []byte
 }
@@ -95,6 +95,7 @@ func New() *cobra.Command {
 				newFlag := pflag.Flag{
 					Name:  f.Name,
 					Usage: f.Usage,
+					Value: f.Value,
 				}
 
 				if f.Name != "credential-context" { // We want to keep credential-context
@@ -108,6 +109,7 @@ func New() *cobra.Command {
 					newFlag := pflag.Flag{
 						Name:  f.Name,
 						Usage: f.Usage,
+						Value: f.Value,
 					}
 
 					if f.Name != "credential-context" {
@@ -130,8 +132,8 @@ func (r *GPTScript) NewGPTScriptOpts() (gptscript.Options, error) {
 		OpenAI:  openai.Options(r.OpenAIOptions),
 		Monitor: monitor.Options(r.DisplayOptions),
 		Runner: runner.Options{
-			CredentialOverride: r.CredentialOverride,
-			Sequential:         r.ForceSequential,
+			CredentialOverrides: r.CredentialOverride,
+			Sequential:          r.ForceSequential,
 		},
 		Quiet:               r.Quiet,
 		Env:                 os.Environ(),
@@ -330,7 +332,7 @@ func (r *GPTScript) Run(cmd *cobra.Command, args []string) (retErr error) {
 
 	// If the user is trying to launch the chat-builder UI, then set up the tool and options here.
 	if r.UI {
-		args = append([]string{env.VarOrDefault("GPTSCRIPT_CHAT_UI_TOOL", "github.com/gptscript-ai/ui@v2")}, args...)
+		args = append([]string{uiTool()}, args...)
 
 		// If args has more than one element, then the user has provided a file.
 		if len(args) > 1 {
@@ -348,7 +350,7 @@ func (r *GPTScript) Run(cmd *cobra.Command, args []string) (retErr error) {
 					return fmt.Errorf("cannot determine absolute path to script %s: %v", file, err)
 				}
 				gptOpt.Env = append(gptOpt.Env, "SCRIPTS_PATH="+filepath.Dir(absPathToScript))
-				file = filepath.Base(file)
+				file = strings.TrimSuffix(filepath.Base(file), ".gpt")
 			} else {
 				cwd, err := os.Getwd()
 				if err != nil {
@@ -359,6 +361,11 @@ func (r *GPTScript) Run(cmd *cobra.Command, args []string) (retErr error) {
 
 			if os.Getenv(system.BinEnvVar) == "" {
 				gptOpt.Env = append(gptOpt.Env, system.BinEnvVar+"="+system.Bin())
+			}
+
+			// If the DefaultModel is set, then pass the correct environment variable.
+			if r.DefaultModel != "" {
+				gptOpt.Env = append(gptOpt.Env, "GPTSCRIPT_SDKSERVER_DEFAULT_MODEL="+r.DefaultModel)
 			}
 
 			args = append([]string{args[0]}, "--file="+file)
@@ -380,7 +387,7 @@ func (r *GPTScript) Run(cmd *cobra.Command, args []string) (retErr error) {
 
 	ctx := cmd.Context()
 
-	gptScript, err := gptscript.New(gptOpt)
+	gptScript, err := gptscript.New(ctx, gptOpt)
 	if err != nil {
 		return err
 	}
@@ -462,7 +469,7 @@ func (r *GPTScript) Run(cmd *cobra.Command, args []string) (retErr error) {
 				DefaultModel:        r.DefaultModel,
 				TrustedRepoPrefixes: []string{"github.com/gptscript-ai"},
 				DisableCache:        r.DisableCache,
-				Input:               strings.Join(args[1:], " "),
+				Input:               toolInput,
 				CacheDir:            r.CacheDir,
 				SubTool:             r.SubTool,
 				Workspace:           r.Workspace,
@@ -487,4 +494,16 @@ func (r *GPTScript) Run(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 	return r.PrintOutput(toolInput, s)
+}
+
+// uiTool returns the versioned UI tool reference for the current GPTScript version.
+// For release versions, a reference with a matching release tag is returned.
+// For all other versions, a reference to main is returned.
+func uiTool() string {
+	ref := "github.com/gptscript-ai/ui"
+	if tag := version.Tag; !strings.Contains(tag, "v0.0.0-dev") {
+		ref = fmt.Sprintf("%s@%s", ref, tag)
+	}
+
+	return env.VarOrDefault("GPTSCRIPT_CHAT_UI_TOOL", ref)
 }

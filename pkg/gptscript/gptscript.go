@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/gptscript-ai/gptscript/pkg/builtin"
 	"github.com/gptscript-ai/gptscript/pkg/cache"
@@ -77,7 +79,7 @@ func complete(opts ...Options) Options {
 	return result
 }
 
-func New(o ...Options) (*GPTScript, error) {
+func New(ctx context.Context, o ...Options) (*GPTScript, error) {
 	opts := complete(o...)
 	registry := llm.NewRegistry()
 
@@ -91,11 +93,6 @@ func New(o ...Options) (*GPTScript, error) {
 		return nil, err
 	}
 
-	credStore, err := credentials.NewStore(cliCfg, opts.CredentialContext, cacheClient.CacheDir())
-	if err != nil {
-		return nil, err
-	}
-
 	if opts.Runner.RuntimeManager == nil {
 		opts.Runner.RuntimeManager = runtimes.Default(cacheClient.CacheDir())
 	}
@@ -104,7 +101,12 @@ func New(o ...Options) (*GPTScript, error) {
 		return nil, err
 	}
 
-	oaiClient, err := openai.NewClient(credStore, opts.OpenAI, openai.Options{
+	credStore, err := credentials.NewStore(cliCfg, opts.Runner.RuntimeManager, opts.CredentialContext, cacheClient.CacheDir())
+	if err != nil {
+		return nil, err
+	}
+
+	oaiClient, err := openai.NewClient(ctx, credStore, opts.OpenAI, openai.Options{
 		Cache:   cacheClient,
 		SetSeed: true,
 	})
@@ -167,7 +169,7 @@ func (g *GPTScript) getEnv(env []string) ([]string, error) {
 		}
 	} else if !filepath.IsAbs(g.WorkspacePath) {
 		var err error
-		g.WorkspacePath, err = filepath.Abs(g.WorkspacePath)
+		g.WorkspacePath, err = makeAbsolute(g.WorkspacePath)
 		if err != nil {
 			return nil, err
 		}
@@ -175,10 +177,22 @@ func (g *GPTScript) getEnv(env []string) ([]string, error) {
 	if err := os.MkdirAll(g.WorkspacePath, 0700); err != nil {
 		return nil, err
 	}
-	return slices.Concat(g.ExtraEnv, []string{
+	return slices.Concat(g.ExtraEnv, env, []string{
 		fmt.Sprintf("GPTSCRIPT_WORKSPACE_DIR=%s", g.WorkspacePath),
 		fmt.Sprintf("GPTSCRIPT_WORKSPACE_ID=%s", hash.ID(g.WorkspacePath)),
-	}, env), nil
+	}), nil
+}
+
+func makeAbsolute(path string) (string, error) {
+	if strings.HasPrefix(path, "~"+string(filepath.Separator)) {
+		usr, err := user.Current()
+		if err != nil {
+			return "", err
+		}
+
+		return filepath.Join(usr.HomeDir, path[2:]), nil
+	}
+	return filepath.Abs(path)
 }
 
 func (g *GPTScript) Chat(ctx context.Context, prevState runner.ChatState, prg types.Program, envs []string, input string) (runner.ChatResponse, error) {

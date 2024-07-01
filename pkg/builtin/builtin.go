@@ -29,6 +29,7 @@ var SafeTools = map[string]struct{}{
 	"sys.abort":        {},
 	"sys.chat.finish":  {},
 	"sys.chat.history": {},
+	"sys.chat.current": {},
 	"sys.echo":         {},
 	"sys.prompt":       {},
 	"sys.time.now":     {},
@@ -229,6 +230,15 @@ var tools = map[string]types.Tool{
 			BuiltinFunc: SysChatHistory,
 		},
 	},
+	"sys.chat.current": {
+		ToolDef: types.ToolDef{
+			Parameters: types.Parameters{
+				Description: "Retrieves the current chat dialog",
+				Arguments:   types.ObjectSchema(),
+			},
+			BuiltinFunc: SysChatCurrent,
+		},
+	},
 	"sys.context": {
 		ToolDef: types.ToolDef{
 			Parameters: types.Parameters{
@@ -336,6 +346,11 @@ func SysExec(_ context.Context, env []string, input string, progress chan<- stri
 		}
 		combined = io.MultiWriter(&out, &pw)
 	)
+
+	if envvars, err := getWorkspaceEnvFileContents(env); err == nil {
+		env = append(env, envvars...)
+	}
+
 	cmd.Env = env
 	cmd.Dir = params.Directory
 	cmd.Stdout = combined
@@ -353,6 +368,43 @@ type progressWriter struct {
 func (pw *progressWriter) Write(p []byte) (n int, err error) {
 	pw.out <- string(p)
 	return len(p), nil
+}
+
+func getWorkspaceEnvFileContents(envs []string) ([]string, error) {
+	dir, err := getWorkspaceDir(envs)
+	if err != nil {
+		return nil, err
+	}
+
+	file := filepath.Join(dir, "gptscript.env")
+
+	// Lock the file to prevent concurrent writes from other tool calls.
+	locker.RLock(file)
+	defer locker.RUnlock(file)
+
+	// This is optional, so no errors are returned if the file does not exist.
+	log.Debugf("Reading file %s", file)
+	data, err := os.ReadFile(file)
+	if errors.Is(err, fs.ErrNotExist) {
+		log.Debugf("The file %s does not exist", file)
+		return []string{}, nil
+	} else if err != nil {
+		log.Debugf("Failed to read file %s: %v", file, err.Error())
+		return []string{}, nil
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var envContents []string
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "=") {
+			envContents = append(envContents, line)
+		}
+	}
+
+	return envContents, nil
+
 }
 
 func getWorkspaceDir(envs []string) (string, error) {
@@ -671,6 +723,28 @@ func writeHistory(ctx *engine.Context) (result []engine.ChatHistoryCall) {
 		})
 	}
 	return
+}
+
+func SysChatCurrent(ctx context.Context, _ []string, _ string, _ chan<- string) (string, error) {
+	engineContext, _ := engine.FromContext(ctx)
+
+	var call any
+	if engineContext != nil && engineContext.CurrentReturn != nil && engineContext.CurrentReturn.State != nil {
+		call = engine.ChatHistoryCall{
+			ID:         engineContext.ID,
+			Tool:       engineContext.Tool,
+			Completion: engineContext.CurrentReturn.State.Completion,
+		}
+	} else {
+		call = map[string]any{}
+	}
+
+	data, err := json.Marshal(call)
+	if err != nil {
+		return invalidArgument("", err), nil
+	}
+
+	return string(data), nil
 }
 
 func SysChatFinish(_ context.Context, _ []string, input string, _ chan<- string) (string, error) {

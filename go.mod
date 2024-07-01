@@ -5,8 +5,6 @@ go 1.22.3
 require (
 	github.com/AlecAivazis/survey/v2 v2.3.7
 	github.com/BurntSushi/locker v0.0.0-20171006230638-a6e239ea1c69
-	github.com/acorn-io/broadcaster v0.0.0-20240105011354-bfadd4a7b45d
-	github.com/acorn-io/cmd v0.0.0-20240404013709-34f690bde37b
 	github.com/adrg/xdg v0.4.0
 	github.com/chzyer/readline v1.5.1
 	github.com/docker/cli v26.0.0+incompatible
@@ -15,8 +13,10 @@ require (
 	github.com/getkin/kin-openapi v0.124.0
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/google/uuid v1.6.0
+	github.com/gptscript-ai/broadcaster v0.0.0-20240625175512-c43682019b86
 	github.com/gptscript-ai/chat-completion-client v0.0.0-20240531200700-af8e7ecf0379
-	github.com/gptscript-ai/tui v0.0.0-20240618230843-2b5961f3341b
+	github.com/gptscript-ai/cmd v0.0.0-20240625175447-4250b42feb7d
+	github.com/gptscript-ai/tui v0.0.0-20240627044440-d416df63c10d
 	github.com/hexops/autogold/v2 v2.2.1
 	github.com/hexops/valast v1.4.4
 	github.com/jaytaylor/html2text v0.0.0-20230321000545-74c2419ad056
@@ -62,7 +62,7 @@ require (
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/gookit/color v1.5.4 // indirect
 	github.com/gorilla/css v1.0.0 // indirect
-	github.com/gptscript-ai/go-gptscript v0.0.0-20240613214812-8111c2b02d71 // indirect
+	github.com/gptscript-ai/go-gptscript v0.0.0-20240625134437-4b83849794cc // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hexops/autogold v1.3.1 // indirect
@@ -94,6 +94,7 @@ require (
 	github.com/pterm/pterm v0.12.79 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
+	github.com/sourcegraph/go-diff-patch v0.0.0-20240223163233-798fd1e94a8e // indirect
 	github.com/ssor/bom v0.0.0-20170718123548-6386211fdfcf // indirect
 	github.com/therootcompany/xz v1.0.1 // indirect
 	github.com/tidwall/match v1.1.1 // indirect

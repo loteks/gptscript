@@ -16,7 +16,7 @@
                 "name": "agent1",
                 "parameters": {
                   "properties": {
-                    "prompt": {
+                    "defaultPromptParameter": {
                       "description": "Prompt to send to the assistant. This may be an instruction or question.",
                       "type": "string"
                     }
@@ -31,7 +31,7 @@
                 "name": "agent2",
                 "parameters": {
                   "properties": {
-                    "prompt": {
+                    "defaultPromptParameter": {
                       "description": "Prompt to send to the assistant. This may be an instruction or question.",
                       "type": "string"
                     }
@@ -75,7 +75,8 @@
               ],
               "usage": {}
             }
-          ]
+          ],
+          "chat": true
         },
         "pending": {
           "call_1": {
@@ -110,7 +111,7 @@
                       "name": "agent2",
                       "parameters": {
                         "properties": {
-                          "prompt": {
+                          "defaultPromptParameter": {
                             "description": "Prompt to send to the assistant. This may be an instruction or question.",
                             "type": "string"
                           }
@@ -145,7 +146,8 @@
                     ],
                     "usage": {}
                   }
-                ]
+                ],
+                "chat": true
               },
               "pending": {
                 "call_2": {
@@ -180,7 +182,7 @@
                             "name": "agent1",
                             "parameters": {
                               "properties": {
-                                "prompt": {
+                                "defaultPromptParameter": {
                                   "description": "Prompt to send to the assistant. This may be an instruction or question.",
                                   "type": "string"
                                 }
@@ -195,7 +197,7 @@
                             "name": "agent3",
                             "parameters": {
                               "properties": {
-                                "prompt": {
+                                "defaultPromptParameter": {
                                   "description": "Prompt to send to the assistant. This may be an instruction or question.",
                                   "type": "string"
                                 }
@@ -230,7 +232,8 @@
                           ],
                           "usage": {}
                         }
-                      ]
+                      ],
+                      "chat": true
                     },
                     "pending": {
                       "call_3": {
@@ -277,7 +280,8 @@
                                 ],
                                 "usage": {}
                               }
-                            ]
+                            ],
+                            "chat": true
                           }
                         },
                         "result": "TEST RESULT CALL: 4"

@@ -93,7 +93,7 @@ func complete(opts ...Options) (Options, error) {
 	return result, err
 }
 
-func NewClient(credStore credentials.CredentialStore, opts ...Options) (*Client, error) {
+func NewClient(ctx context.Context, credStore credentials.CredentialStore, opts ...Options) (*Client, error) {
 	opt, err := complete(opts...)
 	if err != nil {
 		return nil, err
@@ -101,7 +101,7 @@ func NewClient(credStore credentials.CredentialStore, opts ...Options) (*Client,
 
 	// If the API key is not set, try to get it from the cred store
 	if opt.APIKey == "" && opt.BaseURL == "" {
-		cred, exists, err := credStore.Get(BuiltinCredName)
+		cred, exists, err := credStore.Get(ctx, BuiltinCredName)
 		if err != nil {
 			return nil, err
 		}
@@ -276,6 +276,9 @@ func toMessages(request types.CompletionRequest, compat bool) (result []openai.C
 		}
 
 		if len(chatMessage.MultiContent) == 1 && chatMessage.MultiContent[0].Type == openai.ChatMessagePartTypeText {
+			if !request.Chat && strings.TrimSpace(chatMessage.MultiContent[0].Text) == "{}" {
+				continue
+			}
 			chatMessage.Content = chatMessage.MultiContent[0].Text
 			chatMessage.MultiContent = nil
 
@@ -300,9 +303,14 @@ func (c *Client) Call(ctx context.Context, messageRequest types.CompletionReques
 	if messageRequest.Model == "" {
 		messageRequest.Model = c.defaultModel
 	}
+
 	msgs, err := toMessages(messageRequest, !c.setSeed)
 	if err != nil {
 		return nil, err
+	}
+
+	if messageRequest.Chat {
+		msgs = dropMessagesOverCount(messageRequest.MaxTokens, msgs)
 	}
 
 	if len(msgs) == 0 {

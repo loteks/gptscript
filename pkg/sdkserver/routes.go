@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/acorn-io/broadcaster"
+	"github.com/gptscript-ai/broadcaster"
 	"github.com/gptscript-ai/gptscript/pkg/cache"
 	gcontext "github.com/gptscript-ai/gptscript/pkg/context"
 	"github.com/gptscript-ai/gptscript/pkg/gptscript"
@@ -200,7 +200,8 @@ func (s *server) execHandler(w http.ResponseWriter, r *http.Request) {
 		CredentialContext: reqObject.CredentialContext,
 		Runner: runner.Options{
 			// Set the monitor factory so that we can get events from the server.
-			MonitorFactory: NewSessionFactory(s.events),
+			MonitorFactory:      NewSessionFactory(s.events),
+			CredentialOverrides: reqObject.CredentialOverrides,
 		},
 	}
 

@@ -26,17 +26,17 @@ type MonitorFactory interface {
 type Monitor interface {
 	Event(event Event)
 	Pause() func()
-	Stop(output string, err error)
+	Stop(ctx context.Context, output string, err error)
 }
 
 type Options struct {
-	MonitorFactory     MonitorFactory        `usage:"-"`
-	RuntimeManager     engine.RuntimeManager `usage:"-"`
-	StartPort          int64                 `usage:"-"`
-	EndPort            int64                 `usage:"-"`
-	CredentialOverride string                `usage:"-"`
-	Sequential         bool                  `usage:"-"`
-	Authorizer         AuthorizerFunc        `usage:"-"`
+	MonitorFactory      MonitorFactory        `usage:"-"`
+	RuntimeManager      engine.RuntimeManager `usage:"-"`
+	StartPort           int64                 `usage:"-"`
+	EndPort             int64                 `usage:"-"`
+	CredentialOverrides []string              `usage:"-"`
+	Sequential          bool                  `usage:"-"`
+	Authorizer          AuthorizerFunc        `usage:"-"`
 }
 
 type AuthorizerResponse struct {
@@ -58,10 +58,12 @@ func Complete(opts ...Options) (result Options) {
 		result.RuntimeManager = types.FirstSet(opt.RuntimeManager, result.RuntimeManager)
 		result.StartPort = types.FirstSet(opt.StartPort, result.StartPort)
 		result.EndPort = types.FirstSet(opt.EndPort, result.EndPort)
-		result.CredentialOverride = types.FirstSet(opt.CredentialOverride, result.CredentialOverride)
 		result.Sequential = types.FirstSet(opt.Sequential, result.Sequential)
 		if opt.Authorizer != nil {
 			result.Authorizer = opt.Authorizer
+		}
+		if opt.CredentialOverrides != nil {
+			result.CredentialOverrides = append(result.CredentialOverrides, opt.CredentialOverrides...)
 		}
 	}
 	return
@@ -90,7 +92,7 @@ type Runner struct {
 	factory        MonitorFactory
 	runtimeManager engine.RuntimeManager
 	credMutex      sync.Mutex
-	credOverrides  string
+	credOverrides  []string
 	credStore      credentials.CredentialStore
 	sequential     bool
 }
@@ -103,7 +105,7 @@ func New(client engine.Model, credStore credentials.CredentialStore, opts ...Opt
 		factory:        opt.MonitorFactory,
 		runtimeManager: opt.RuntimeManager,
 		credMutex:      sync.Mutex{},
-		credOverrides:  opt.CredentialOverride,
+		credOverrides:  opt.CredentialOverrides,
 		credStore:      credStore,
 		sequential:     opt.Sequential,
 		auth:           opt.Authorizer,
@@ -162,7 +164,7 @@ func (r *Runner) Chat(ctx context.Context, prevState ChatState, prg types.Progra
 		return resp, err
 	}
 	defer func() {
-		monitor.Stop(resp.Content, err)
+		monitor.Stop(ctx, resp.Content, err)
 	}()
 
 	callCtx, err := engine.NewContext(ctx, &prg, input)
@@ -250,7 +252,7 @@ var (
 	EventTypeRunFinish    EventType = "runFinish"
 )
 
-func getContextInput(prg *types.Program, ref types.ToolReference, input string) (string, error) {
+func getToolRefInput(prg *types.Program, ref types.ToolReference, input string) (string, error) {
 	if ref.Arg == "" {
 		return "", nil
 	}
@@ -355,7 +357,7 @@ func (r *Runner) getContext(callCtx engine.Context, state *State, monitor Monito
 			continue
 		}
 
-		contextInput, err := getContextInput(callCtx.Program, toolRef, input)
+		contextInput, err := getToolRefInput(callCtx.Program, toolRef, input)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -425,9 +427,7 @@ func (r *Runner) start(callCtx engine.Context, state *State, monitor Monitor, en
 		}
 	}
 
-	var (
-		newState *State
-	)
+	var newState *State
 	callCtx.InputContext, newState, err = r.getContext(callCtx, state, monitor, env, input)
 	if err != nil {
 		return nil, err
@@ -561,13 +561,15 @@ func (r *Runner) resume(callCtx engine.Context, monitor Monitor, env []string, s
 	}
 
 	for {
+		callCtx.CurrentReturn = state.Continuation
+
 		if state.Continuation.Result != nil && len(state.Continuation.Calls) == 0 && state.SubCallID == "" && state.ResumeInput == nil {
 			progressClose()
 			monitor.Event(Event{
 				Time:        time.Now(),
 				CallContext: callCtx.GetCallContext(),
 				Type:        EventTypeCallFinish,
-				Content:     getFinishEventContent(*state, callCtx),
+				Content:     getEventContent(*state.Continuation.Result, callCtx),
 			})
 			if callCtx.Tool.Chat {
 				return &State{
@@ -632,9 +634,7 @@ func (r *Runner) resume(callCtx engine.Context, monitor Monitor, env []string, s
 			Env:            env,
 		}
 
-		var (
-			contentInput string
-		)
+		var contentInput string
 
 		if state.Continuation != nil && state.Continuation.State != nil {
 			contentInput = state.Continuation.State.Input
@@ -681,7 +681,7 @@ func streamProgress(callCtx *engine.Context, monitor Monitor) (chan<- types.Comp
 					CallContext:      callCtx.GetCallContext(),
 					Type:             EventTypeCallProgress,
 					ChatCompletionID: status.CompletionID,
-					Content:          message.String(),
+					Content:          getEventContent(message.String(), *callCtx),
 				})
 			} else {
 				monitor.Event(Event{
@@ -745,9 +745,7 @@ func (r *Runner) newDispatcher(ctx context.Context) dispatcher {
 }
 
 func (r *Runner) subCalls(callCtx engine.Context, monitor Monitor, env []string, state *State, toolCategory engine.ToolCategory) (_ *State, callResults []SubCallResult, _ error) {
-	var (
-		resultLock sync.Mutex
-	)
+	var resultLock sync.Mutex
 
 	if state.Continuation != nil {
 		callCtx.LastReturn = state.Continuation
@@ -821,13 +819,13 @@ func (r *Runner) subCalls(callCtx engine.Context, monitor Monitor, env []string,
 	return state, callResults, nil
 }
 
-func getFinishEventContent(state State, callCtx engine.Context) string {
-	// If it is a credential tool, the finish event contains its output, which is sensitive, so we don't return it.
+func getEventContent(content string, callCtx engine.Context) string {
+	// If it is a credential tool, the progress and finish events may contain its output, which is sensitive, so we don't return it.
 	if callCtx.ToolCategory == engine.CredentialToolCategory {
 		return ""
 	}
 
-	return *state.Continuation.Result
+	return content
 }
 
 func (r *Runner) handleCredentials(callCtx engine.Context, monitor Monitor, env []string) ([]string, error) {
@@ -840,7 +838,7 @@ func (r *Runner) handleCredentials(callCtx engine.Context, monitor Monitor, env 
 		credOverrides map[string]map[string]string
 		err           error
 	)
-	if r.credOverrides != "" {
+	if r.credOverrides != nil {
 		credOverrides, err = parseCredentialOverrides(r.credOverrides)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse credential overrides: %w", err)
@@ -867,7 +865,7 @@ func (r *Runner) handleCredentials(callCtx engine.Context, monitor Monitor, env 
 		}
 
 		var (
-			cred   *credentials.Credential
+			c      *credentials.Credential
 			exists bool
 		)
 
@@ -879,25 +877,39 @@ func (r *Runner) handleCredentials(callCtx engine.Context, monitor Monitor, env 
 		// Only try to look up the cred if the tool is on GitHub or has an alias.
 		// If it is a GitHub tool and has an alias, the alias overrides the tool name, so we use it as the credential name.
 		if isGitHubTool(toolName) && credentialAlias == "" {
-			cred, exists, err = r.credStore.Get(toolName)
+			c, exists, err = r.credStore.Get(callCtx.Ctx, toolName)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get credentials for tool %s: %w", toolName, err)
 			}
 		} else if credentialAlias != "" {
-			cred, exists, err = r.credStore.Get(credentialAlias)
+			c, exists, err = r.credStore.Get(callCtx.Ctx, credentialAlias)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get credentials for tool %s: %w", credentialAlias, err)
 			}
 		}
 
+		if c == nil {
+			c = &credentials.Credential{}
+		}
+
 		// If the credential doesn't already exist in the store, run the credential tool in order to get the value,
 		// and save it in the store.
-		if !exists {
+		if !exists || c.IsExpired() {
 			credToolRefs, ok := callCtx.Tool.ToolMapping[credToolName]
 			if !ok || len(credToolRefs) != 1 {
 				return nil, fmt.Errorf("failed to find ID for tool %s", credToolName)
 			}
 
+			// If the existing credential is expired, we need to provide it to the cred tool through the environment.
+			if exists && c.IsExpired() {
+				credJSON, err := json.Marshal(c)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal credential: %w", err)
+				}
+				env = append(env, fmt.Sprintf("%s=%s", credentials.ExistingCredential, string(credJSON)))
+			}
+
+			// Get the input for the credential tool, if there is any.
 			var input string
 			if args != nil {
 				inputBytes, err := json.Marshal(args)
@@ -916,21 +928,14 @@ func (r *Runner) handleCredentials(callCtx engine.Context, monitor Monitor, env 
 				return nil, fmt.Errorf("invalid state: credential tool [%s] can not result in a continuation", credToolName)
 			}
 
-			var envMap struct {
-				Env map[string]string `json:"env"`
-			}
-			if err := json.Unmarshal([]byte(*res.Result), &envMap); err != nil {
+			if err := json.Unmarshal([]byte(*res.Result), &c); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal credential tool %s response: %w", credToolName, err)
 			}
-
-			cred = &credentials.Credential{
-				Type:     credentials.CredentialTypeTool,
-				Env:      envMap.Env,
-				ToolName: credName,
-			}
+			c.ToolName = credName
+			c.Type = credentials.CredentialTypeTool
 
 			isEmpty := true
-			for _, v := range cred.Env {
+			for _, v := range c.Env {
 				if v != "" {
 					isEmpty = false
 					break
@@ -941,7 +946,7 @@ func (r *Runner) handleCredentials(callCtx engine.Context, monitor Monitor, env 
 			if (isGitHubTool(toolName) && callCtx.Program.ToolSet[credToolRefs[0].ToolID].Source.Repo != nil) || credentialAlias != "" {
 				if isEmpty {
 					log.Warnf("Not saving empty credential for tool %s", toolName)
-				} else if err := r.credStore.Add(*cred); err != nil {
+				} else if err := r.credStore.Add(callCtx.Ctx, *c); err != nil {
 					return nil, fmt.Errorf("failed to add credential for tool %s: %w", toolName, err)
 				}
 			} else {
@@ -949,7 +954,7 @@ func (r *Runner) handleCredentials(callCtx engine.Context, monitor Monitor, env 
 			}
 		}
 
-		for k, v := range cred.Env {
+		for k, v := range c.Env {
 			env = append(env, fmt.Sprintf("%s=%s", k, v))
 		}
 	}

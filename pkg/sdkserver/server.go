@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/acorn-io/broadcaster"
 	"github.com/google/uuid"
+	"github.com/gptscript-ai/broadcaster"
 	"github.com/gptscript-ai/gptscript/pkg/gptscript"
 	"github.com/gptscript-ai/gptscript/pkg/mvl"
 	"github.com/gptscript-ai/gptscript/pkg/runner"
@@ -53,7 +53,7 @@ func Start(ctx context.Context, opts Options) error {
 	// prompt server because it is only used for fmt, parse, etc.
 	opts.Env = append(opts.Env, fmt.Sprintf("%s=%s", types.PromptTokenEnvVar, token))
 
-	g, err := gptscript.New(opts.Options)
+	g, err := gptscript.New(ctx, opts.Options)
 	if err != nil {
 		return err
 	}
